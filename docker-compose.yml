@@ -1,0 +1,61 @@
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    platform: linux/amd64
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    platform: linux/amd64
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  producer:
+    build: .
+    command: python src/producer_sensor.py
+    volumes:
+      - .:/app
+      - ./data:/data
+    depends_on:
+      - kafka
+
+  edge:
+    build: .
+    command: python src/consumer_edge.py --bootstrap kafka:9092 --mode ml --scaler models/scaler.pkl --ml-model models/rf_model.pkl --out-csv edge_results_ml_rf.csv --track-emissions --emissions-file edge_emissions_ml_rf.csv
+    volumes:
+      - .:/app
+    cpus: 0.25
+    environment:
+      - CPU_LIMIT=1
+      - CODECARBON_CPU_MODEL=ARM Cortex-A72
+      - CODECARBON_CPU_COUNT=1
+      - CODECARBON_COUNTRY_ISO_CODE=ITA
+    mem_limit: 2g
+    depends_on:
+      - kafka
+
+  cloud:
+    build: .
+    command: python src/consumer_cloud.py --bootstrap kafka:9092 --mode ml --scaler models/scaler.pkl --ml-model rf_model.pkl --out-csv cloud_results_ml_rf.csv --track-emissions --emissions-file cloud_emissions_ml_rf.csv
+    volumes:
+      - .:/app
+    depends_on:
+      - kafka
+    cpus: 10
+    environment:
+      - CPU_LIMIT=10
+      - CODECARBON_CPU_MODEL=Intel Xeon
+      - CODECARBON_CPU_COUNT=10
+      - CODECARBON_COUNTRY_ISO_CODE=ITA
+    mem_limit: 8g
